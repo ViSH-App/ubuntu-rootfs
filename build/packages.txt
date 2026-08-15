@@ -1,0 +1,48 @@
+# Packages installed on top of ubuntu-base.
+# Keep this list lean to minimize the compressed rootfs size.
+#
+# Installed with --no-install-recommends, so anything not listed here (and not
+# a hard dependency) stays out. Deliberately NOT installed: `locales` /
+# `locales-all` (C.UTF-8 already ships in libc-bin and locales-all alone adds
+# ~54 MB compressed), systemd, and anything pulling an init system.
+
+# C/C++ runtime libraries (for prebuilt third-party binaries)
+libstdc++6
+
+# Shell
+bash
+
+# pid 1 + getty. Static so it never depends on a half-upgraded libc.
+busybox-static
+
+# Editors
+nano
+vim-tiny
+
+# Userland gaps that coreutils does not cover
+file
+less
+unzip
+xz-utils
+
+# Account management and privilege escalation
+sudo
+
+# Crypto / TLS roots
+ca-certificates
+openssl
+tzdata
+
+# Networking (curl/ssh/ping/ip are all separate packages on Ubuntu).
+# `dig` is deliberately absent: bind9-dnsutils drags in libicu74 (+31 MB
+# uncompressed, ~12 MB in the release tarball) for a tool one apt-get away.
+curl
+wget
+openssh-client
+iputils-ping
+iproute2
+
+# VCS & process inspection
+git
+procps
+htop

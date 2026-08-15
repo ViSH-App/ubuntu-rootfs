@@ -1,0 +1,63 @@
+name: Build & release rootfs
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+    inputs:
+      ubuntu_base_version:
+        description: "ubuntu-base point release (e.g. 24.04.4). Must exist on cdimage."
+        required: false
+        default: "24.04.4"
+
+# No scheduled rebuild on purpose: the app pins a specific release tag and
+# sha256 in its rootfs catalog, so releases must stay downloadable forever and
+# new ones are cut only when this repo changes.
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ARCH: aarch64
+      UBUNTU_VERSION: "24.04"
+      UBUNTU_BASE_VERSION: ${{ github.event.inputs.ubuntu_base_version || '24.04.4' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up QEMU (arm64)
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      - name: Build rootfs
+        run: ./build/build.sh
+
+      - name: Compute release tag
+        id: meta
+        run: |
+          DATE=$(date -u +%Y%m%d-%H%M)
+          TAG="v${UBUNTU_VERSION}-${DATE}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "name=Ubuntu ${UBUNTU_BASE_VERSION} (${ARCH}) — ${DATE} UTC" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }}
+          make_latest: "true"
+          generate_release_notes: true
+          files: |
+            dist/ubuntu-aarch64-rootfs.tar.gz
+            dist/ubuntu-aarch64-rootfs.tar.gz.sha256
+            dist/ubuntu-aarch64-rootfs.tar.zst
+            dist/ubuntu-aarch64-rootfs.tar.zst.sha256
