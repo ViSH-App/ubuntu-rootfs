@@ -33,8 +33,10 @@ curl -fsSL -o "$WORK/SHA256SUMS" "$BASE_URL/SHA256SUMS"
 echo ">> Extracting ubuntu-base"
 tar --numeric-owner -xzf "$WORK/$BASE_TARBALL" -C "$TARGET"
 
-# The official arm64 base image already points at ports.ubuntu.com; keep it and
-# fail loudly if that ever changes (the app's mirror editor rewrites this file).
+# The official arm64 base image already points at ports.ubuntu.com; keep that
+# host and fail loudly if it ever changes (the app's mirror editor rewrites this
+# file and matches the shipped host against its "official mirror" preset).
+# The scheme is switched to https further down, once ca-certificates is in.
 SOURCES="$TARGET/etc/apt/sources.list.d/ubuntu.sources"
 grep -q "ports.ubuntu.com" "$SOURCES"
 
@@ -67,6 +69,20 @@ chroot "$TARGET" env DEBIAN_FRONTEND=noninteractive apt-get update
 # shellcheck disable=SC2086
 chroot "$TARGET" env DEBIAN_FRONTEND=noninteractive \
     apt-get install -y --no-install-recommends $PACKAGES
+
+# Ship the sources over https. iOS blocks cleartext http by default, so the
+# app's mirror presets (and its latency probes) are all https; an http:// URI
+# here would never match the official-mirror preset and every user would see
+# their source listed as "custom". Done only now that ca-certificates is
+# installed — the bootstrap above has no TLS roots to verify with. The
+# apt-get update that follows proves the https transport actually works.
+# The trailing slash upstream ships goes too: the app compares the configured
+# URI against its preset, and "…/ubuntu-ports/" is not "…/ubuntu-ports".
+sed -i 's#^URIs:[[:space:]]*http://ports\.ubuntu\.com/ubuntu-ports/*[[:space:]]*$#URIs: https://ports.ubuntu.com/ubuntu-ports#' "$SOURCES"
+grep -q '^URIs: https://ports\.ubuntu\.com/ubuntu-ports$' "$SOURCES"
+! grep -q '^URIs:.*http://' "$SOURCES"
+echo ">> Verifying the https sources"
+chroot "$TARGET" env DEBIAN_FRONTEND=noninteractive apt-get update
 
 # Kernel release reported by `uname -r`. The guest kernel reads
 # /etc/kernel-osrelease (kernel/uname.c) and only accepts a plain dotted-numeric

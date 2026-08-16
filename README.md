@@ -75,8 +75,11 @@ written to `dist/`. Only the `aarch64` target is currently supported.
   `/etc/hosts` with `127.0.0.1` and `127.0.1.1` entries, root's login shell set
   to Bash, apt lists and caches removed.
 
-Package sources stay on `ports.ubuntu.com`
-(`/etc/apt/sources.list.d/ubuntu.sources`).
+Package sources stay on the official `ports.ubuntu.com`
+(`/etc/apt/sources.list.d/ubuntu.sources`) and are rewritten to `https://`:
+clients that forbid cleartext http must still be able to reach the default
+mirror. The build verifies the https transport with an `apt-get update` before
+packing.
 
 ## Releases
 
