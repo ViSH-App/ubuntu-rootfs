@@ -81,8 +81,45 @@ chroot "$TARGET" env DEBIAN_FRONTEND=noninteractive \
 sed -i 's#^URIs:[[:space:]]*http://ports\.ubuntu\.com/ubuntu-ports/*[[:space:]]*$#URIs: https://ports.ubuntu.com/ubuntu-ports#' "$SOURCES"
 grep -q '^URIs: https://ports\.ubuntu\.com/ubuntu-ports$' "$SOURCES"
 ! grep -q '^URIs:.*http://' "$SOURCES"
-echo ">> Verifying the https sources"
+# apt index cost. Under ViSH the CPU is emulated (~10x slower than native on
+# branchy integer code), so `apt-get update` is bound by index DECOMPRESSION,
+# hashing and the package-cache build — not by the network. Measured on the
+# Mac harness (this rootfs, 8 host cores, same mirror, back to back):
+#   stock (xz indexes, translations, all 4 components):  58.6 s, 205 MB of lists
+#   + Acquire::Languages "none":                         38.5 s, 148 MB
+#   + main universe multiverse (no restricted):          ~32 s,  ~122 MB
+#   + gz instead of xz indexes:                          22.2 s  (fetch 20 s -> 11 s:
+#     gzip inflates 2.6x faster than xz in the guest; costs +5 MB of download)
+# On the iPad the CPU share is larger still, so every one of these matters more
+# there. Two of them are what the official Docker image does (docker-no-languages,
+# docker-gzip-indexes); `restricted` is proprietary drivers/firmware, nothing an
+# emulator can use. What is lost: `apt show` long descriptions (Translation-en)
+# — the short description in Packages is still shown.
+cat > "$TARGET/etc/apt/apt.conf.d/10index-cost" <<'EOF'
+// See ubuntu-rootfs build/inside.sh: index decompression + cache build are
+// the cost of `apt-get update` on an emulated CPU, so keep the indexes small
+// and cheap to inflate. Delete this file to get stock apt behaviour back.
+Acquire::Languages "none";
+Acquire::CompressionTypes::Order:: "gz";
+EOF
+sed -i 's/^Components:[[:space:]]*main universe restricted multiverse[[:space:]]*$/Components: main universe multiverse/' "$SOURCES"
+grep -q '^Components: main universe multiverse$' "$SOURCES"
+! grep -q '^Components:.*restricted' "$SOURCES"
+
+# Start from empty lists so this update fetches the TRIMMED set from scratch
+# (the bootstrap update above already pulled the stock set over http, and apt
+# would just "Hit" those). The lists are stripped again before packing.
+LISTS="$TARGET/var/lib/apt/lists"
+rm -rf "${LISTS:?}"/*
+echo ">> Verifying the https sources (and the trimmed index set)"
 chroot "$TARGET" env DEBIAN_FRONTEND=noninteractive apt-get update
+# Prove the trims took: no translation or restricted index was fetched.
+# (`! cmd` is exempt from set -e, so test explicitly.)
+if ls "$LISTS" | grep -qE '_i18n_Translation-|_restricted_'; then
+    echo "apt fetched a translation/restricted index despite the trim:" >&2
+    ls "$LISTS" | grep -E '_i18n_Translation-|_restricted_' >&2
+    exit 1
+fi
 
 # Kernel release reported by `uname -r`. The guest kernel reads
 # /etc/kernel-osrelease (kernel/uname.c) and only accepts a plain dotted-numeric
