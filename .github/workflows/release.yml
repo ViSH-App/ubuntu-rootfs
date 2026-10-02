@@ -17,7 +17,7 @@ on:
 # new ones are cut only when this repo changes.
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release
@@ -25,8 +25,14 @@ concurrency:
 
 jobs:
   build:
+    name: Build (${{ matrix.target }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [default, minimal]
     env:
+      ROOTFS_TARGET: ${{ matrix.target }}
       ARCH: aarch64
       UBUNTU_VERSION: "24.04"
       UBUNTU_BASE_VERSION: ${{ github.event.inputs.ubuntu_base_version || '24.04.4' }}
@@ -41,23 +47,61 @@ jobs:
       - name: Build rootfs
         run: ./build/build.sh
 
+      - name: Upload verified rootfs
+        uses: actions/upload-artifact@v4
+        with:
+          name: rootfs-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  release:
+    name: Publish both targets
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      UBUNTU_VERSION: "24.04"
+      UBUNTU_BASE_VERSION: ${{ github.event.inputs.ubuntu_base_version || '24.04.4' }}
+    steps:
+      - name: Download both rootfs targets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: rootfs-*
+          merge-multiple: true
+          path: dist
+
+      - name: Verify release assets
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          for target in "" "-minimal"; do
+            for format in gz zst; do
+              name="ubuntu-aarch64${target}-rootfs.tar.${format}"
+              test -s "$name"
+              sha256sum -c "$name.sha256"
+            done
+          done
+          test -s ubuntu-aarch64-minimal-rootfs.manifest.json
+          sha256sum -c ubuntu-aarch64-minimal-rootfs.manifest.json.sha256
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 10
+
       - name: Compute release tag
         id: meta
         run: |
-          DATE=$(date -u +%Y%m%d-%H%M)
-          TAG="v${UBUNTU_VERSION}-${DATE}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "name=Ubuntu ${UBUNTU_BASE_VERSION} (${ARCH}) — ${DATE} UTC" >> "$GITHUB_OUTPUT"
+          DATE=$(date -u +%Y%m%d-%H%M%S)
+          echo "tag=v${UBUNTU_VERSION}-${DATE}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          echo "name=Ubuntu ${UBUNTU_BASE_VERSION} (aarch64, default + minimal) — ${DATE} UTC" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           name: ${{ steps.meta.outputs.name }}
           make_latest: "true"
           generate_release_notes: true
-          files: |
-            dist/ubuntu-aarch64-rootfs.tar.gz
-            dist/ubuntu-aarch64-rootfs.tar.gz.sha256
-            dist/ubuntu-aarch64-rootfs.tar.zst
-            dist/ubuntu-aarch64-rootfs.tar.zst.sha256
+          fail_on_unmatched_files: true
+          files: dist/*

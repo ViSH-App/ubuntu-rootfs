@@ -11,6 +11,9 @@ set -eu
 : "${OUT_NAME:?}"
 : "${OUT_NAME_ZSTD:?}"
 
+ROOTFS_TARGET="${ROOTFS_TARGET:-default}"
+case "$ROOTFS_TARGET" in default|minimal) ;; *) exit 1 ;; esac
+
 TARGET=/tmp/rootfs
 WORK=/tmp/work
 mkdir -p "$TARGET" "$WORK"
@@ -19,6 +22,11 @@ export DEBIAN_FRONTEND=noninteractive
 
 apt-get update >/dev/null
 apt-get install -y --no-install-recommends ca-certificates curl tar zstd >/dev/null
+
+if [ "$ROOTFS_TARGET" = minimal ]; then
+    # Build/verification tools stay in the outer container, never in the payload.
+    apt-get install -y --no-install-recommends python3 gcc g++ binutils >/dev/null
+fi
 
 BASE_URL="https://cdimage.ubuntu.com/ubuntu-base/releases/${UBUNTU_VERSION}/release"
 BASE_TARBALL="ubuntu-base-${UBUNTU_BASE_VERSION}-base-${DEB_ARCH}.tar.gz"
@@ -61,7 +69,9 @@ exit 101
 EOF
 chmod 0755 "$TARGET/usr/sbin/policy-rc.d"
 
-PACKAGES=$(grep -vE '^[[:space:]]*(#|$)' /build/packages.txt | tr '\n' ' ')
+PACKAGE_FILE=/build/packages.txt
+[ "$ROOTFS_TARGET" != minimal ] || PACKAGE_FILE=/build/packages-minimal.txt
+PACKAGES=$(grep -vE '^[[:space:]]*(#|$)' "$PACKAGE_FILE" | tr '\n' ' ')
 
 echo ">> Installing packages:"
 echo "   $PACKAGES"
@@ -69,6 +79,10 @@ chroot "$TARGET" env DEBIAN_FRONTEND=noninteractive apt-get update
 # shellcheck disable=SC2086
 chroot "$TARGET" env DEBIAN_FRONTEND=noninteractive \
     apt-get install -y --no-install-recommends $PACKAGES
+
+if [ "$ROOTFS_TARGET" = minimal ]; then
+    exec /build/minimal.sh "$TARGET" "$WORK"
+fi
 
 # Ship the sources over https. iOS blocks cleartext http by default, so the
 # app's mirror presets (and its latency probes) are all https; an http:// URI

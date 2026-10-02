@@ -6,6 +6,12 @@
 # Output:   dist/<OUT_NAME> and dist/<OUT_NAME>.sha256
 set -euo pipefail
 
+ROOTFS_TARGET="${ROOTFS_TARGET:-default}"
+case "$ROOTFS_TARGET" in
+  default|minimal) ;;
+  *) echo "unsupported ROOTFS_TARGET: $ROOTFS_TARGET" >&2; exit 1 ;;
+esac
+
 ARCH="${ARCH:-aarch64}"
 UBUNTU_VERSION="${UBUNTU_VERSION:-24.04}"
 # Point release of the ubuntu-base tarball published under
@@ -19,13 +25,17 @@ esac
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST_DIR="$REPO_ROOT/dist"
-OUT_NAME="ubuntu-${ARCH}-rootfs.tar.gz"
-OUT_NAME_ZSTD="ubuntu-${ARCH}-rootfs.tar.zst"
+SUFFIX=""
+[ "$ROOTFS_TARGET" != minimal ] || SUFFIX="-minimal"
+OUT_NAME="ubuntu-${ARCH}${SUFFIX}-rootfs.tar.gz"
+OUT_NAME_ZSTD="ubuntu-${ARCH}${SUFFIX}-rootfs.tar.zst"
+MANIFEST_NAME="ubuntu-${ARCH}${SUFFIX}-rootfs.manifest.json"
 
 mkdir -p "$DIST_DIR"
 rm -f \
   "$DIST_DIR/$OUT_NAME" "$DIST_DIR/$OUT_NAME.sha256" \
-  "$DIST_DIR/$OUT_NAME_ZSTD" "$DIST_DIR/$OUT_NAME_ZSTD.sha256"
+  "$DIST_DIR/$OUT_NAME_ZSTD" "$DIST_DIR/$OUT_NAME_ZSTD.sha256" \
+  "$DIST_DIR/$MANIFEST_NAME" "$DIST_DIR/$MANIFEST_NAME.sha256"
 
 echo ">> Building $OUT_NAME, $OUT_NAME_ZSTD (ubuntu-base $UBUNTU_BASE_VERSION, $ARCH on $DOCKER_PLATFORM)"
 
@@ -34,6 +44,7 @@ docker run --rm --platform "$DOCKER_PLATFORM" \
   -v "$DIST_DIR:/out" \
   -e UBUNTU_VERSION="$UBUNTU_VERSION" \
   -e UBUNTU_BASE_VERSION="$UBUNTU_BASE_VERSION" \
+  -e ROOTFS_TARGET="$ROOTFS_TARGET" \
   -e ARCH="$ARCH" \
   -e DEB_ARCH="$DEB_ARCH" \
   -e OUT_NAME="$OUT_NAME" \
@@ -50,6 +61,11 @@ fi
 for f in "$OUT_NAME" "$OUT_NAME_ZSTD"; do
   $SHA "$f" > "$f.sha256"
 done
+
+if [ "$ROOTFS_TARGET" = minimal ]; then
+  test -s "$MANIFEST_NAME"
+  $SHA "$MANIFEST_NAME" > "$MANIFEST_NAME.sha256"
+fi
 
 echo ">> Done"
 ls -lah "$DIST_DIR/$OUT_NAME" "$DIST_DIR/$OUT_NAME.sha256" \

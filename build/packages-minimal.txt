@@ -1,0 +1,11 @@
+# Packages used to assemble the embedded runtime. Only selected runtime files
+# are shipped; apt dependencies and maintainer tools are build-time inputs.
+libc6
+# Only C.UTF-8 locale data from libc-bin is shipped, not its CLI tools.
+libc-bin
+libgcc-s1
+libstdc++6
+zlib1g
+busybox-static
+ca-certificates
+tzdata
