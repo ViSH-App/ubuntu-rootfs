@@ -26,9 +26,9 @@ concurrency:
 jobs:
   build:
     name: Build (${{ matrix.target }})
-    runs-on:
-      group: ubuntu
-      labels: medium
+    # Native arm64: the self-hosted ubuntu runners can't register QEMU
+    # binfmt with their Docker daemon, so arm64 containers fail to exec.
+    runs-on: ubuntu-24.04-arm
     strategy:
       fail-fast: false
       matrix:
@@ -40,11 +40,6 @@ jobs:
       UBUNTU_BASE_VERSION: ${{ github.event.inputs.ubuntu_base_version || '24.04.4' }}
     steps:
       - uses: actions/checkout@v6
-
-      - name: Set up QEMU (arm64)
-        uses: docker/setup-qemu-action@v4
-        with:
-          platforms: arm64
 
       - name: Build rootfs
         run: ./build/build.sh
