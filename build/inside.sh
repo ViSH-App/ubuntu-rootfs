@@ -41,12 +41,18 @@ curl -fsSL -o "$WORK/SHA256SUMS" "$BASE_URL/SHA256SUMS"
 echo ">> Extracting ubuntu-base"
 tar --numeric-owner -xzf "$WORK/$BASE_TARBALL" -C "$TARGET"
 
-# The official arm64 base image already points at ports.ubuntu.com; keep that
-# host and fail loudly if it ever changes (the app's mirror editor rewrites this
-# file and matches the shipped host against its "official mirror" preset).
+# Ship ports.ubuntu.com and fail loudly if the layout ever changes (the app's
+# mirror editor rewrites this file and matches the shipped host against its
+# "official mirror" preset, an ubuntu-ports tree). The 24.04 arm64 base image
+# already points there. From 26.04 the arm64 base image names the unified
+# archive instead (archive.ubuntu.com for the release suites,
+# security.ubuntu.com for -security); ports.ubuntu.com serves the same suites
+# with the same InRelease, so both stanzas are pointed back at it.
 # The scheme is switched to https further down, once ca-certificates is in.
 SOURCES="$TARGET/etc/apt/sources.list.d/ubuntu.sources"
+sed -i -E 's#^URIs:[[:space:]]*http://(archive|security)\.ubuntu\.com/ubuntu/*[[:space:]]*$#URIs: http://ports.ubuntu.com/ubuntu-ports/#' "$SOURCES"
 grep -q "ports.ubuntu.com" "$SOURCES"
+! grep -qE '^URIs:.*(archive|security)\.ubuntu\.com' "$SOURCES"
 
 # Provide DNS to the chroot during install only.
 cp /etc/resolv.conf "$TARGET/etc/resolv.conf"

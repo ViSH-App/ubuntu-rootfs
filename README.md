@@ -1,8 +1,14 @@
 # Ubuntu Root Filesystem
 
-Ubuntu 24.04 LTS root filesystem variants for 64-bit ARM systems. The build
-starts from an official, version-pinned Canonical `ubuntu-base` tarball and
-produces plain compressed tar archives without container image metadata.
+Ubuntu 24.04 LTS and 26.04 LTS root filesystem variants for 64-bit ARM
+systems. The build starts from an official, version-pinned Canonical
+`ubuntu-base` tarball and produces plain compressed tar archives without
+container image metadata.
+
+Each Ubuntu release is published as its own GitHub release, tagged
+`v<version>-<date>-<run>` (for example `v26.04-…`). A push to `main` rebuilds
+every release listed in the workflow's `plan` job; a manual run can build
+just one of them.
 
 ## Artifacts
 
@@ -21,7 +27,8 @@ Localization data beyond `C.UTF-8` is not installed.
 
 ## Download
 
-Use the stable latest-release URLs:
+Use the stable latest-release URLs (`latest` is the newest Ubuntu release, 26.04;
+pin a tag for 24.04):
 
 ```text
 https://github.com/ViSH-App/ubuntu-rootfs/releases/latest/download/ubuntu-aarch64-rootfs.tar.gz
@@ -48,10 +55,10 @@ through QEMU/binfmt.
 ./build/build.sh
 ```
 
-To select a specific `ubuntu-base` point release:
+To select the Ubuntu release and its `ubuntu-base` point release:
 
 ```sh
-UBUNTU_BASE_VERSION=24.04.4 ./build/build.sh
+UBUNTU_VERSION=26.04 UBUNTU_BASE_VERSION=26.04.1 ./build/build.sh
 ```
 
 The base tarball is downloaded from
@@ -80,6 +87,11 @@ For the default target, package sources stay on the official `ports.ubuntu.com`
 clients that forbid cleartext http must still be able to reach the default
 mirror. The build verifies the https transport with an `apt-get update` before
 packing.
+
+26.04's arm64 base tarball names the unified archive (`archive.ubuntu.com` for
+the release suites, `security.ubuntu.com` for `-security`) instead of ports.
+`ports.ubuntu.com` serves the same suites with the same `InRelease`, so the
+build points both stanzas back at it and every release ships the same host.
 
 ## Releases
 

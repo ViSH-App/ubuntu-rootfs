@@ -7,10 +7,12 @@ on:
       - "**.md"
   workflow_dispatch:
     inputs:
-      ubuntu_base_version:
-        description: "ubuntu-base point release (e.g. 24.04.4). Must exist on cdimage."
+      ubuntu_version:
+        description: "Which release to build (all = every entry in the plan job)."
         required: false
-        default: "24.04.4"
+        type: choice
+        default: all
+        options: [all, "24.04", "26.04"]
 
 # No scheduled rebuild on purpose: the app pins a specific release tag and
 # sha256 in its rootfs catalog, so releases must stay downloadable forever and
@@ -24,20 +26,48 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # One entry per Ubuntu release this repo publishes. `base` is the point
+  # release of the ubuntu-base tarball under
+  # https://cdimage.ubuntu.com/ubuntu-base/releases/<version>/release/.
+  # Every release gets its own GitHub release (tag v<version>-…); the app
+  # pins each tag and sha256 separately.
+  plan:
+    name: Plan
+    # GitHub-hosted (ships jq), like the build job.
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      releases: ${{ steps.plan.outputs.releases }}
+    steps:
+      - id: plan
+        env:
+          ONLY: ${{ github.event.inputs.ubuntu_version || 'all' }}
+        run: |
+          set -euo pipefail
+          all='[{"version":"24.04","base":"24.04.4","latest":"false"},{"version":"26.04","base":"26.04.1","latest":"true"}]'
+          if [ "$ONLY" = all ]; then
+            releases=$all
+          else
+            releases=$(printf '%s' "$all" | jq -c --arg v "$ONLY" '[.[] | select(.version == $v)]')
+          fi
+          test "$(printf '%s' "$releases" | jq length)" -gt 0
+          echo "releases=$releases" >> "$GITHUB_OUTPUT"
+
   build:
-    name: Build (${{ matrix.target }})
+    name: Build (${{ matrix.ubuntu.version }} ${{ matrix.target }})
+    needs: plan
     # Native arm64: the self-hosted ubuntu runners can't register QEMU
     # binfmt with their Docker daemon, so arm64 containers fail to exec.
     runs-on: ubuntu-24.04-arm
     strategy:
       fail-fast: false
       matrix:
+        ubuntu: ${{ fromJSON(needs.plan.outputs.releases) }}
         target: [default, minimal]
     env:
       ROOTFS_TARGET: ${{ matrix.target }}
       ARCH: aarch64
-      UBUNTU_VERSION: "24.04"
-      UBUNTU_BASE_VERSION: ${{ github.event.inputs.ubuntu_base_version || '24.04.4' }}
+      UBUNTU_VERSION: ${{ matrix.ubuntu.version }}
+      UBUNTU_BASE_VERSION: ${{ matrix.ubuntu.base }}
     steps:
       - uses: actions/checkout@v6
 
@@ -47,28 +77,32 @@ jobs:
       - name: Upload verified rootfs
         uses: actions/upload-artifact@v4
         with:
-          name: rootfs-${{ matrix.target }}
+          name: rootfs-${{ matrix.ubuntu.version }}-${{ matrix.target }}
           path: dist/*
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
 
   release:
-    name: Publish both targets
-    needs: build
+    name: Publish ${{ matrix.ubuntu.version }}
+    needs: [plan, build]
     runs-on:
       group: ubuntu
       labels: medium
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ${{ fromJSON(needs.plan.outputs.releases) }}
     env:
-      UBUNTU_VERSION: "24.04"
-      UBUNTU_BASE_VERSION: ${{ github.event.inputs.ubuntu_base_version || '24.04.4' }}
+      UBUNTU_VERSION: ${{ matrix.ubuntu.version }}
+      UBUNTU_BASE_VERSION: ${{ matrix.ubuntu.base }}
     steps:
       - name: Download both rootfs targets
         uses: actions/download-artifact@v4
         with:
-          pattern: rootfs-*
+          pattern: rootfs-${{ matrix.ubuntu.version }}-*
           merge-multiple: true
           path: dist
 
@@ -100,14 +134,14 @@ jobs:
           tag_name: ${{ steps.meta.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: ${{ steps.meta.outputs.name }}
-          make_latest: "true"
+          make_latest: ${{ matrix.ubuntu.latest }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: dist/*
 
   cleanup:
     name: Delete workflow artifacts
-    needs: [build, release]
+    needs: [plan, build, release]
     if: ${{ always() }}
     runs-on:
       group: ubuntu
